@@ -1,0 +1,26 @@
+homepage: https://github.com/saketh12e/memforge
+language: c++
+primary_contact: saketh12e@users.noreply.github.com
+auto_ccs:
+fuzzing_engines:
+  - libfuzzer
+sanitizers:
+  - address
+  - undefined
+main_repo: https://github.com/saketh12e/memforge
+fuzz_targets:
+  - arena_fuzzer
+  - pool_fuzzer
+  - handle_fuzzer
+  - epoch_fuzzer
+  - scope_fuzzer
+  - migrate_fuzzer
+  - stats_fuzzer
+  - checkpoint_fuzzer
+  - pin_fuzzer
+  - defer_fuzzer
+  - compact_fuzzer
+  - shard_fuzzer
+  - guard_fuzzer
+  - batch_fuzzer
+  - teardown_fuzzer
