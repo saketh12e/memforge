@@ -5,7 +5,7 @@
 #include <memforge/api.hpp>
 
 // End-to-end smoke tests that exercise the ResourceHub with realistic op
-// streams. These tests do NOT trigger the planted bugs; they verify the
+
 // happy path for each module.
 
 namespace {

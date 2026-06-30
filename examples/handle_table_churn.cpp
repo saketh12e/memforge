@@ -24,10 +24,9 @@ int main() {
         std::printf("resolve %u -> %s\n", handles[i], s.ok() ? "ok" : "fail");
     }
 
-    // Re-insert slot 1, generation bumps; old handle now stale.
     table.insert(HandleInsertOp{1, 99}, handles[0]);
     Status s = table.resolve(handles[0], slot);
-    std::printf("after re-insert resolve -> %s\n", s.ok() ? "ok" : "stale");
+    std::printf("after re-insert resolve -> %s\n", s.ok() ? "ok" : "missing");
 
     table.shutdown();
     return 0;

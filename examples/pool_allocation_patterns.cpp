@@ -1,7 +1,6 @@
 // Example: pool allocation patterns.
 //
 // Demonstrates three allocation patterns: bulk allocate-then-free,
-// interleaved alloc/free, and growing a class to trigger slab expansion.
 
 #include <cstdio>
 #include <vector>

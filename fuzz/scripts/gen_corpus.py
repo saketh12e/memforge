@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # Generate per-harness seed corpora for MemForge.
 #
-# Each seed is a small, well-formed op stream that exercises the public
-# surface of one module. The seeds are intentionally small so the fuzzer can
-# mutate outward to reach deeper bugs.
+# Each seed is a small, well-formed op stream that exercises one public
+# module surface and gives the fuzzer structured input to mutate.
 
 import os
 import struct

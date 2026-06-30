@@ -13,10 +13,4 @@ compile_commands.json
 *.tmp
 *.swp
 .DS_Store
-binprobe/
-cantracekit/
-heapsift/
-styleprobe/
-vaultpack/
-bugforge/
-/fuzz/.verify-build/
+/poc_bin/

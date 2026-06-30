@@ -3,6 +3,10 @@
 #
 # Builds every harness in fuzz/targets.list into $OUT and copies the seed
 # corpus / dictionary. The build is deterministic and free of network calls.
+#
+# IMPORTANT: fuzzer binaries do NOT link src/cli/memforge.cpp (which defines
+# `main()`). Only production sources under src/ (excluding src/cli/) are
+# compiled into fuzzer object files.
 
 set -o pipefail
 
@@ -11,8 +15,8 @@ cd "${SRC:-/src/memforge}"
 OUT_DIR="${OUT:-/out}"
 mkdir -p "$OUT_DIR"
 
-# Production object set (shared by library + CLI).
-PROD_SOURCES=$(find src -type f -name '*.cpp' | sort)
+# Production object set (shared by library). src/cli/ is excluded here.
+PROD_SOURCES=$(find src -type f -name '*.cpp' -not -path 'src/cli/*' | sort)
 PROD_OBJECTS=()
 for src in $PROD_SOURCES; do
     obj="$OUT_DIR/$(echo "$src" | tr '/' '_').o"

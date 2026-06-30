@@ -1,6 +1,6 @@
 // Example: shard attach and rebalance.
 //
-// Attaches two slabs to two shards and triggers a rebalance; prints the
+// Attaches two slabs to two shards and runs a rebalance; prints the
 // move count.
 
 #include <cstdio>

@@ -90,6 +90,7 @@ void test_checkpoint_header_size() {
 void test_checkpoint_reader_magic() {
     using namespace memforge;
     std::uint8_t bytes[64] = {};
+    std::uint32_t magic = 0xC1AB0001u;
     std::memcpy(bytes, &magic, sizeof(magic));
     assert(CheckpointReader::verifyMagic(bytes));
     bytes[0] = 0;

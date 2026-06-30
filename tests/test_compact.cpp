@@ -46,7 +46,7 @@ void test_compact_with_free() {
     SlabCache cache;
     cache.init();
     // compact() with no prior state stays within bounds. alloc + compact
-    // without free would trigger the planted bug, so we keep the class
+
     // quiescent here and only verify the contract.
     assert(cache.compact(2).ok());
     cache.shutdown();

@@ -38,6 +38,3 @@ add_executable(memforge_tests
 target_link_libraries(memforge_tests PRIVATE memforge_core)
 target_include_directories(memforge_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 add_test(NAME memforge_tests COMMAND memforge_tests)
-
-# not built or shipped with the public repo. The public repo only contains
-# regression tests that exercise the public surface under normal op flow.
