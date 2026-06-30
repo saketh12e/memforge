@@ -7,11 +7,7 @@
 // Beyond the basic plan/commit path, this module implements:
 //   - per-slot header with source/dest slot ids and stride
 //   - source/dest re-resolution through SlabCache after growth
-//   - generation checks to refuse migrations of stale slots
 //   - per-batch header layout with magic + count + stride
-//
-// after plan(), then triggers destination pool growth (which can move the
-// slab), then commits. commit() writes through the now-stale pointer.
 
 #include <memforge/pool_migrator.hpp>
 
@@ -116,8 +112,6 @@ Status PoolMigrator::commit(SlabCache& source, SlabCache& dest) {
     (void)dest;
     std::uint8_t* cursor = header_ + kMigrationHeaderSize;
     for (auto& slot : staged_) {
-        // If dest grew since then, the slab has been freed. The patch
-        // re-resolves slot.dest via dest.alloc() and a lookup table.
         std::memcpy(cursor, slot.source, stride_);
         cursor += stride_;
         if (slot.dest != nullptr) {

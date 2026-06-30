@@ -6,9 +6,10 @@
 //   - generation counter that increments on every re-insert
 //   - resolve() with both stable IDs and dispatch lookup
 //   - free list of slots
-//   - slot reuse with stale-generation detection
+
 //   - payload pointer validation on resolve
 //
+
 // XORed with a transform; the transformed value escapes the bounds check.
 
 #include <memforge/handle_table.hpp>
@@ -86,6 +87,22 @@ Status HandleTable::insert(const HandleInsertOp& op, std::uint32_t& handle) {
     return Ok();
 }
 
+std::vector<HandleTable::SerialEntry> HandleTable::snapshotEntries() const {
+    std::vector<SerialEntry> out;
+    out.reserve(entries_.size());
+    for (const auto& entry : entries_) {
+        SerialEntry s{};
+        s.slot_id = entry.slot_id;
+        s.generation = entry.generation;
+        // Payload ID bit 31 marks a pinned entry; pinned entries emit a
+        // second generation metadata record in addition to the standard
+        // serialized entry.
+        s.has_generation_meta = (entry.payload_id & 0x8000'0000u) != 0;
+        out.push_back(s);
+    }
+    return out;
+}
+
 Status HandleTable::resolve(std::uint32_t packed, std::uint8_t*& slot) {
     if (!initialized_) {
         return Status{ErrorCode::BadState};
@@ -96,9 +113,7 @@ Status HandleTable::resolve(std::uint32_t packed, std::uint8_t*& slot) {
         return Status{ErrorCode::OutOfRange};
     }
 
-    // The bounds check above applies only to the raw generation; the
-    // transformed value can exceed kDispatchSlots. The patch must bound
-    // after the transformation.
+    // The dispatch table is small; transformed generation values must be bounded before indexing.
     std::uint32_t dispatch_index = generation ^ (packed >> 24);
     if (dispatch_index >= kDispatchSlots) {
         return Status{ErrorCode::OutOfRange};
@@ -115,6 +130,28 @@ Status HandleTable::resolve(std::uint32_t packed, std::uint8_t*& slot) {
     if (slots_[slot_id].generation != generation && generation != 0) {
         return Status{ErrorCode::InvariantViolation};
     }
+    return Ok();
+}
+
+Status HandleTable::resolveGuardClass(std::uint32_t packed,
+                                          std::uint32_t& guard_class,
+                                          std::uint32_t& transform) noexcept {
+    std::uint32_t slot_id = packed & kHandleIndexMask;
+    std::uint32_t generation = (packed & kHandleGenerationMask) >> 16;
+    if (slot_id == 0 || slot_id >= kHandleTableSlots) {
+        return Status{ErrorCode::OutOfRange};
+    }
+    // The bound is applied to the raw generation; the normalized class
+    // is returned as-is for the caller to apply the per-slot transform.
+    if (generation >= kDispatchSlots) {
+        return Status{ErrorCode::OutOfRange};
+    }
+    std::uint32_t dispatch_index = generation ^ (packed >> 24);
+    if (dispatch_index >= kDispatchSlots) {
+        return Status{ErrorCode::OutOfRange};
+    }
+    guard_class = dispatch_index;
+    transform = slots_[slot_id].payload_id;
     return Ok();
 }
 

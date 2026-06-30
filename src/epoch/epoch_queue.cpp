@@ -9,12 +9,11 @@
 //   - safe iteration over retired_ that survives erase
 //   - epoch resolution with sub-tick deltas
 //
-// backing storage, then drains. drain() walks a stale cursor into freed
-// memory.
 
 #include <memforge/epoch_queue.hpp>
 
 #include <cstdlib>
+#include <cstring>
 #include <new>
 
 namespace memforge {
@@ -128,8 +127,7 @@ Status EpochQueue::drain(std::uint32_t cap) {
     if (cap == 0) {
         cap = static_cast<std::uint32_t>(retired_.size());
     }
-    // When retired_ is shrunk by previous drains, cursor_index_ can address
-    // a freed element. The patch must clamp cursor_index_ on each entry.
+    // Walk retired_ with a clamped cursor; each drain resets the cursor when retired_ shrinks.
     if (cursor_index_ >= retired_.size()) {
         cursor_index_ = 0;
     }
@@ -142,6 +140,51 @@ Status EpochQueue::drain(std::uint32_t cap) {
             cursor_index_ = 0;
         }
     }
+    return Ok();
+}
+
+Status EpochQueue::drainToTransfer(std::uint32_t cap,
+                                       std::vector<std::uint8_t*>& transferred,
+                                       std::vector<std::uint32_t>& sizes) noexcept {
+    if (!initialized_) {
+        return Status{ErrorCode::BadState};
+    }
+    if (retired_.empty()) {
+        return Ok();
+    }
+    if (cap == 0) {
+        cap = static_cast<std::uint32_t>(retired_.size());
+    }
+    if (cursor_index_ >= retired_.size()) {
+        cursor_index_ = 0;
+    }
+    std::uint32_t moved = 0;
+    while (cursor_index_ < retired_.size() && moved < cap) {
+        EpochNode& node = retired_[cursor_index_];
+        transferred.push_back(node.payload);
+        sizes.push_back(node.size_hint);
+        // Keep a compact cursor view for follow-up summary materialization.
+        if (moved == 0) {
+            cached_cursor_view_ = node.payload;
+            cached_cursor_size_ = node.size_hint;
+        }
+        node.payload = nullptr;
+        retired_.erase(retired_.begin() + cursor_index_);
+        ++moved;
+        if (cursor_index_ >= retired_.size()) {
+            cursor_index_ = 0;
+        }
+    }
+    return Ok();
+}
+
+Status EpochQueue::cursorSummary(std::vector<std::uint8_t>& out) noexcept {
+    out.clear();
+    if (!initialized_ || cached_cursor_view_ == nullptr) {
+        return Ok();
+    }
+    out.resize(cached_cursor_size_);
+    std::memcpy(out.data(), cached_cursor_view_, cached_cursor_size_);
     return Ok();
 }
 

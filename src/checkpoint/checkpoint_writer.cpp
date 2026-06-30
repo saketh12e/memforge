@@ -9,11 +9,11 @@
 //   - per-section magic + length + count
 //   - CRC32 of the entire buffer on finalize
 //   - per-section table layout with magic + length + count
-//
-// driving both the allocation and the copy loop bound off the same truncated
-// value.
 
 #include <memforge/checkpoint.hpp>
+#include <memforge/arena_chain.hpp>
+#include <memforge/handle_table.hpp>
+#include <memforge/batch_allocator.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -66,6 +66,53 @@ void CheckpointWriter::shutdown() noexcept {
     }
     table_slab_bytes_ = 0;
     begun_ = false;
+    pin_snapshots_.clear();
+    if (stats_section_ != nullptr) {
+        std::free(stats_section_);
+        stats_section_ = nullptr;
+    }
+    stats_section_capacity_ = 0;
+    stats_section_used_ = 0;
+    stats_entry_bytes_ = 0;
+    stats_capacity_bytes_ = 0;
+    if (arena_section_ != nullptr) {
+        std::free(arena_section_);
+        arena_section_ = nullptr;
+    }
+    arena_section_capacity_ = 0;
+    arena_section_bytes_ = 0;
+    if (batch_section_ != nullptr) {
+        std::free(batch_section_);
+        batch_section_ = nullptr;
+    }
+    batch_section_capacity_ = 0;
+    batch_section_bytes_ = 0;
+}
+
+void CheckpointWriter::registerPinSnapshot(std::uint8_t* payload,
+                                              std::uint32_t bytes) {
+    if (payload == nullptr || bytes == 0) {
+        return;
+    }
+    PinSnapshotSlot slot{};
+    slot.payload = payload;
+    slot.bytes = bytes;
+    pin_snapshots_.push_back(slot);
+}
+
+Status CheckpointWriter::finalizePinSnapshots() noexcept {
+    for (auto& slot : pin_snapshots_) {
+        if (slot.payload == nullptr) {
+            continue;
+        }
+        // Snapshot copy into the checkpoint buffer; ownership is transferred
+        // into the serialized stream.
+        buffer_.insert(buffer_.end(), slot.payload, slot.payload + slot.bytes);
+        delete[] slot.payload;
+        slot.payload = nullptr;
+    }
+    pin_snapshots_.clear();
+    return Ok();
 }
 
 Status CheckpointWriter::begin(const CheckpointBeginOp& op) {
@@ -105,7 +152,6 @@ Status CheckpointWriter::writeHandleTable(const CheckpointWriteHandleTableOp& op
         return Status{ErrorCode::InvalidArgument};
     }
 
-    // The truncated value drives both the allocation and the copy loop.
     std::uint32_t bytes = op.handle_count * op.entry_size;
     if (table_slab_ != nullptr) {
         std::free(table_slab_);
@@ -147,6 +193,135 @@ Status CheckpointWriter::apply(const OpStream& ops) {
             break;
         default:
             break;
+        }
+    }
+    return Ok();
+}
+
+Status CheckpointWriter::beginStatsSection(std::uint32_t plan_size,
+                                              std::uint32_t entry_bytes) {
+    if (stats_section_ != nullptr) {
+        std::free(stats_section_);
+        stats_section_ = nullptr;
+    }
+    stats_section_capacity_ = plan_size * entry_bytes;
+    if (stats_section_capacity_ == 0) {
+        stats_section_capacity_ = 1;
+    }
+    stats_section_ = static_cast<std::uint8_t*>(
+        std::malloc(stats_section_capacity_));
+    if (stats_section_ == nullptr) {
+        return Status{ErrorCode::Exhausted};
+    }
+    stats_entry_bytes_ = entry_bytes;
+    stats_section_used_ = 0;
+    stats_capacity_bytes_ = stats_section_capacity_;
+    return Ok();
+}
+
+Status CheckpointWriter::writeStatsEntryFromPlan(
+    const std::uint8_t* entry_bytes, std::uint32_t bytes) {
+    if (stats_section_ == nullptr) {
+        return Status{ErrorCode::BadState};
+    }
+    std::memcpy(stats_section_ + stats_section_used_, entry_bytes, bytes);
+    stats_section_used_ += bytes;
+    return Ok();
+}
+
+Status CheckpointWriter::writeArenaSection(ArenaChain& arena) noexcept {
+    arena.finalizeBlocks();
+    std::uint32_t capacity = arena.finalizedBytes();
+    if (arena_section_ != nullptr) {
+        std::free(arena_section_);
+        arena_section_ = nullptr;
+    }
+    arena_section_capacity_ = capacity ? capacity : 1;
+    arena_section_ = static_cast<std::uint8_t*>(
+        std::malloc(arena_section_capacity_));
+    if (arena_section_ == nullptr) {
+        return Status{ErrorCode::Exhausted};
+    }
+    arena_section_bytes_ = arena_section_capacity_;
+    std::uint32_t cursor = 0;
+    for (std::size_t i = 0; i < arena.blockCount(); ++i) {
+        const ArenaBlock& block = arena.block(i);
+        std::uint32_t bytes = block.byte_count;
+        if (bytes > 0 && block.payload != nullptr) {
+            std::memcpy(arena_section_ + cursor, block.payload, bytes);
+            cursor += bytes;
+        }
+    }
+    return Ok();
+}
+
+Status CheckpointWriter::writeHandleTableFromExpanded(
+    const std::vector<HandleTable::SerialEntry>& entries,
+    const CheckpointWriteHandleTableOp& op) noexcept {
+    if (!begun_) {
+        return Status{ErrorCode::BadState};
+    }
+    // Allocate from the caller's nominal table dimensions.
+    std::uint32_t bytes = op.handle_count * op.entry_size;
+    if (table_slab_ != nullptr) {
+        std::free(table_slab_);
+    }
+    table_slab_bytes_ = bytes;
+    table_slab_ = static_cast<std::uint8_t*>(std::malloc(bytes ? bytes : 1));
+    if (table_slab_ == nullptr) {
+        return Status{ErrorCode::Exhausted};
+    }
+    std::uint8_t* cursor = table_slab_;
+    for (const auto& s : entries) {
+        std::uint32_t entry[4] = {};
+        entry[0] = op.snapshot_id;
+        entry[1] = s.slot_id;
+        entry[2] = s.generation;
+        entry[3] = op.entry_size;
+        std::memcpy(cursor, entry, op.entry_size > 16 ? 16 : op.entry_size);
+        cursor += op.entry_size;
+        if (s.has_generation_meta) {
+            std::uint32_t meta[4] = {};
+            meta[0] = op.snapshot_id ^ 0xDEAD'BEEFu;
+            meta[1] = s.generation;
+            meta[2] = 0;
+            meta[3] = op.entry_size;
+            std::memcpy(cursor, meta, op.entry_size > 16 ? 16 : op.entry_size);
+            cursor += op.entry_size;
+        }
+    }
+    return Ok();
+}
+
+Status CheckpointWriter::writeBatchSection(BatchAllocator& batch,
+                                              ArenaChain& arena) noexcept {
+    arena.finalizeBlocks();
+    batch.commit(BatchCommitOp{1});
+    std::uint32_t capacity = batch.currentSlabBytes();
+    if (batch_section_ != nullptr) {
+        std::free(batch_section_);
+        batch_section_ = nullptr;
+    }
+    batch_section_capacity_ = capacity ? capacity : 1;
+    batch_section_ = static_cast<std::uint8_t*>(
+        std::malloc(batch_section_capacity_));
+    if (batch_section_ == nullptr) {
+        return Status{ErrorCode::Exhausted};
+    }
+    batch_section_bytes_ = batch_section_capacity_;
+
+    // Per-batch headers (16 bytes each) and arena summary records (32 bytes
+    // each) are emitted in addition to the slab payload.
+    std::uint32_t cursor = 0;
+    std::uint32_t batch_header_bytes = 16;
+    std::uint32_t arena_summary_bytes = 32;
+    for (std::size_t i = 0; i < batch.pending() + arena.blockCount(); ++i) {
+        if (i < batch.pending()) {
+            std::memcpy(batch_section_ + cursor, &i, sizeof(i));
+            cursor += batch_header_bytes;
+        } else {
+            std::memcpy(batch_section_ + cursor, &i, sizeof(i));
+            cursor += arena_summary_bytes;
         }
     }
     return Ok();

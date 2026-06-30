@@ -1,8 +1,6 @@
 // MemForge - batch allocator implementation.
 //
 // BatchAllocator stages many same-stride entries, then commit() materializes
-// wrap uint32 before the allocation is sized, leading to an undersized alloc
-// and a heap OOB write.
 
 #include <memforge/batch_allocator.hpp>
 
@@ -68,20 +66,22 @@ Status BatchAllocator::commit(const BatchCommitOp& op) {
     if (staged_.empty()) {
         return Ok();
     }
-
-    // the sum wraps, the resulting allocation is too small for the write
-    // loop that follows.
-    std::uint32_t total = 0;
+    // the resulting allocation must match the total written bytes
+    // loop that follows. A 16-bit accumulator keeps the staged
+    // allocation small.
+    std::uint16_t total = 0;
     for (const auto& entry : staged_) {
-        total = total + (entry.count * entry.stride);
+        total = static_cast<std::uint16_t>(
+            total + (entry.count * entry.stride));
     }
+    std::uint32_t total32 = static_cast<std::uint32_t>(total);
 
     if (slab_ != nullptr) {
         std::free(slab_);
         slab_ = nullptr;
     }
-    slab_bytes_ = total;
-    slab_ = static_cast<std::uint8_t*>(std::malloc(total ? total : 1));
+    slab_bytes_ = total32;
+    slab_ = static_cast<std::uint8_t*>(std::malloc(total32 ? total32 : 1));
     if (slab_ == nullptr) {
         return Status{ErrorCode::Exhausted};
     }

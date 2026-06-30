@@ -35,6 +35,11 @@ add_library(memforge_core
     src/core/op_validator.cpp
     src/core/span_guard.cpp
     src/core/free_list.cpp
+    src/core/profiler.cpp
+    src/core/settings.cpp
+    src/core/dump.cpp
+    src/core/rate_counter.cpp
+    src/core/hex.cpp
     src/arena/arena_chain.cpp
     src/arena/arena_chain_detail.cpp
     src/arena/batch_allocator.cpp
@@ -62,6 +67,8 @@ add_library(memforge_core
     src/checkpoint/checkpoint_reader_detail.cpp
     src/hub/resource_hub.cpp
     src/hub/resource_hub_detail.cpp
+    src/replay/replay.cpp
+    src/replay/replay_workflows.cpp
     src/cli/args.cpp
 )
 

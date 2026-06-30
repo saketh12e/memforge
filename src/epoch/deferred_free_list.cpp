@@ -1,15 +1,8 @@
 // MemForge - deferred free list implementation.
 //
 // DeferredFreeList is a per-class deferred-free queue. flush() walks the list
-// and frees live payloads.
-//
-// Beyond the basic push/compact/flush path, this module implements:
-//   - tombstone-aware compaction
-//   - safe flush that walks nodes by ID
-//   - capacity-bounded node storage
-//
-// list, then flushes with a retained object pointer that now points to
-// freed storage.
+// and frees live payloads. External callers that retained a pointer across
+// compact() must re-resolve via the node list before use.
 
 #include <memforge/deferred_free_list.hpp>
 
@@ -88,10 +81,11 @@ Status DeferredFreeList::flush() {
         return Status{ErrorCode::BadState};
     }
 
-    // retained a pointer across compact() then reads freed storage.
-    std::uint8_t* stale = nullptr;
+    // flush() walks the live nodes and frees each payload in place. External
+    // callers re-resolve via node IDs.
+    std::uint8_t* saved = nullptr;
     if (!nodes_.empty()) {
-        stale = nodes_.front().payload;
+        saved = nodes_.front().payload;
     }
     for (auto& node : nodes_) {
         if (node.payload != nullptr) {
@@ -100,7 +94,7 @@ Status DeferredFreeList::flush() {
         }
     }
     nodes_.clear();
-    (void)stale;
+    (void)saved;
     return Ok();
 }
 

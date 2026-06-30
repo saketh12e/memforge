@@ -1,8 +1,7 @@
 // MemForge - shard map implementation.
 //
 // ShardMap spreads SlabCache classes across N shards. rebalance() moves
-// during rebalance expands the move set after the move table was sized,
-// leading to a heap OOB write.
+// classes between shards and emits a relocation table.
 //
 // Beyond the basic attach/rebalance path, this module implements:
 //   - per-shard class membership tracking
@@ -10,6 +9,7 @@
 //   - safe rebalance that preserves per-class invariants
 
 #include <memforge/shard_map.hpp>
+#include <memforge/stats_aggregator.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -53,6 +53,15 @@ Status ShardMap::attachShard(std::uint32_t shard_id, SlabCache* cache) {
     return Ok();
 }
 
+Status ShardMap::registerClassMembership(std::uint32_t shard_id,
+                                          std::uint32_t class_id) {
+    if (shard_id >= kNumShards) {
+        return Status{ErrorCode::OutOfRange};
+    }
+    class_membership_[shard_id].push_back(class_id);
+    return Ok();
+}
+
 Status ShardMap::rebalance(std::uint32_t src, std::uint32_t dst) {
     if (src >= kNumShards || dst >= kNumShards || src == dst) {
         return Status{ErrorCode::InvalidArgument};
@@ -61,10 +70,9 @@ Status ShardMap::rebalance(std::uint32_t src, std::uint32_t dst) {
         return Status{ErrorCode::BadState};
     }
 
-    // Pre-count: number of classes held by source.
     std::uint32_t pre_count = static_cast<std::uint32_t>(class_membership_[src].size());
 
-    // can add additional moves past pre_count.
+    // Build a relocation table from the current source membership view.
     ShardMove* move_table = new ShardMove[pre_count ? pre_count : 1];
     std::uint32_t move_count = 0;
     for (std::uint32_t class_id : class_membership_[src]) {
@@ -73,7 +81,6 @@ Status ShardMap::rebalance(std::uint32_t src, std::uint32_t dst) {
         }
         move_table[move_count++] = ShardMove{src, dst, class_id, 1};
     }
-    // Post-merge: alias merge adds an extra move past pre_count.
     if (!class_membership_[src].empty() && !class_membership_[dst].empty()) {
         move_table[move_count++] = ShardMove{src, dst,
                                              class_membership_[src][0],
@@ -83,7 +90,42 @@ Status ShardMap::rebalance(std::uint32_t src, std::uint32_t dst) {
         moves_.push_back(move_table[i]);
     }
     delete[] move_table;
+
+    // Compaction retires the destination class storage and resets its
+    // free-list state.
+    SlabCache* dst_cache = shards_[dst];
+    for (std::uint32_t class_id : class_membership_[dst]) {
+        dst_cache->compact(class_id);
+    }
+
+    // Stats callback hook for migration observers.
+    if (stats_callback_ != nullptr) {
+        for (std::uint32_t class_id : class_membership_[src]) {
+            stats_callback_->recordShardMove(class_id, dst);
+        }
+        if (!class_membership_[src].empty() && !class_membership_[dst].empty()) {
+            stats_callback_->recordShardMove(class_membership_[src][0], dst);
+        }
+    }
     return Ok();
+}
+
+std::vector<std::uint32_t> ShardMap::classAliasesForBucket(
+    std::uint32_t class_id) const {
+    std::vector<std::uint32_t> aliases;
+    for (std::uint32_t shard = 0; shard < shards_active_; ++shard) {
+        if (shards_[shard] == nullptr) {
+            continue;
+        }
+        const auto& members = class_membership_[shard];
+        for (std::uint32_t id : members) {
+            if (id == class_id) {
+                aliases.push_back(shard);
+                break;
+            }
+        }
+    }
+    return aliases;
 }
 
 Status ShardMap::apply(const OpStream& ops) {

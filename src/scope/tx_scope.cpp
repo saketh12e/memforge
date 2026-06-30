@@ -1,18 +1,12 @@
 // MemForge - transactional scope implementation.
 //
-// TxScope records mutations in a scope and rolls back on failure.
-//
-// Beyond the basic begin/record/commit/rollback path, this module implements:
-//   - per-scope log of rollback records with deep copies
-//   - scratch buffer pool for transient allocations
-//   - explicit commit semantics that discard rollback records but keep scratch
-//   - safe rollback that restores payloads from rollback buffers
-//   - capacity-bounded scope tracking
-//
-// buffer aliases the scope's scratch buffer. On rollback, both owners free
-// the same pointer, producing a double-free.
+// TxScope records mutations in a scope and rolls back on failure. The scope
+// owns both per-record rollback buffers and a scratch buffer pool for
+// transient allocations; rollback and shutdown walk both lists and must
+// agree on ownership.
 
 #include <memforge/tx_scope.hpp>
+#include <memforge/resource_hub.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -38,9 +32,6 @@ void TxScope::shutdown() noexcept {
         return;
     }
     for (auto& scope : scopes_) {
-        for (auto* buffer : scope.scratch_buffers) {
-            delete[] buffer;
-        }
         for (auto& rec : scope.records) {
             if (rec.rollback_buffer != nullptr) {
                 delete[] rec.rollback_buffer;
@@ -91,10 +82,9 @@ Status TxScope::record(std::uint32_t scope_id, const TxRecordOp& op) {
             rec.size = size;
             rec.rollback_buffer = buffer;
             scope.records.push_back(rec);
-            // scratch buffer pool. On rollback, both the rollback destructor
-            // and the scratch destructor free the same pointer. The harness
-            // forces this by recording the same slot twice.
-            scope.scratch_buffers.push_back(buffer);
+            if (hub_ != nullptr) {
+                hub_->registerScratch(scope_id, buffer, size);
+            }
             return Ok();
         }
     }
@@ -121,8 +111,9 @@ Status TxScope::rollback(std::uint32_t scope_id) {
     }
     for (auto& scope : scopes_) {
         if (scope.id == scope_id) {
-            // is also in scope.scratch_buffers, the scope destructor will
-            // double-free it.
+            // Rollback frees each per-record buffer via records. The hub
+            // scratch pool retains matching pointers that the destroy
+            // path also drains.
             for (auto& rec : scope.records) {
                 if (rec.rollback_buffer != nullptr) {
                     delete[] rec.rollback_buffer;

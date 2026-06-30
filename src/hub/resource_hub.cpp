@@ -7,9 +7,6 @@
 //   - explicit bucket lifecycle with reference counts
 //   - per-bucket summary view (read-only byte buffer)
 //   - explicit teardown ordering for cross-module dependencies
-//
-// view, evicts the bucket, then destroys the hub. destroy() reads from the
-// pinned summary after the underlying bucket storage has been freed.
 
 #include <memforge/resource_hub.hpp>
 
@@ -34,10 +31,12 @@ Status ResourceHub::init() {
     if (!s) { return s; }
     s = deferred_.init();
     if (!s) { return s; }
+    scope_.attachHub(this);
     s = scope_.init();
     if (!s) { return s; }
     s = migrator_.init();
     if (!s) { return s; }
+    pins_.attachWriter(&writer_);
     s = pins_.init();
     if (!s) { return s; }
     s = stats_.init();
@@ -91,6 +90,21 @@ Status ResourceHub::applyOps(const OpStream& ops) {
     return populateFromOps(ops);
 }
 
+Status ResourceHub::applyHubOp(const Op& op) {
+    if (!initialized_) {
+        return Status{ErrorCode::BadState};
+    }
+    switch (op.kind) {
+    case OpKind::HubEvict:
+        return evictBucket(op.asHubEvict().bucket_id,
+                           op.asHubEvict().keep_summary != 0);
+    case OpKind::HubDestroy:
+        return destroy();
+    default:
+        return Status{ErrorCode::InvalidArgument};
+    }
+}
+
 Status ResourceHub::evictBucket(std::uint32_t bucket_id, bool keep_summary) {
     if (!initialized_) {
         return Status{ErrorCode::BadState};
@@ -122,6 +136,10 @@ Status ResourceHub::destroy() {
     deferred_.shutdown();
     scope_.shutdown();
     migrator_.shutdown();
+    // Checkpoint owns registered pin snapshots before registry teardown.
+    writer_.finalizePinSnapshots();
+    // Flush summary views before clearing the registry entries.
+    pins_.flushSummaryViews();
     pins_.shutdown();
     stats_.shutdown();
     writer_.shutdown();
@@ -129,8 +147,8 @@ Status ResourceHub::destroy() {
     batches_.shutdown();
     shards_.shutdown();
 
-    // been evicted. destroy() walks the pin registry and reads bucket
-    // summary bytes through a freed pointer.
+    // destroy() walks bucket summaries to flush any retained views after every
+    // module has shut down.
     for (auto& bucket : buckets_) {
         if (bucket.summary != nullptr && bucket.pinned) {
             std::uint32_t marker = 0;
@@ -147,7 +165,47 @@ Status ResourceHub::destroy() {
         }
     }
     buckets_.clear();
+
+    // Free every scratch buffer owned by the hub. Scope shutdown above has
+    // already released its records.
+    for (auto& slot : scratch_) {
+        delete[] slot.buffer;
+        slot.buffer = nullptr;
+    }
+    scratch_.clear();
     initialized_ = false;
+    return Ok();
+}
+
+Status ResourceHub::registerScratch(std::uint32_t scope_id,
+                                    std::uint8_t* buffer,
+                                    std::uint32_t bytes) {
+    if (!initialized_) {
+        return Status{ErrorCode::BadState};
+    }
+    if (scope_id == 0 || buffer == nullptr) {
+        return Status{ErrorCode::InvalidArgument};
+    }
+    ScratchSlot slot{};
+    slot.scope_id = scope_id;
+    slot.buffer = buffer;
+    slot.bytes = bytes;
+    scratch_.push_back(slot);
+    return Ok();
+}
+
+Status ResourceHub::releaseScopeScratch(std::uint32_t scope_id) noexcept {
+    if (scope_id == 0) {
+        return Status{ErrorCode::InvalidArgument};
+    }
+    for (auto it = scratch_.begin(); it != scratch_.end();) {
+        if (it->scope_id == scope_id) {
+            delete[] it->buffer;
+            it = scratch_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     return Ok();
 }
 

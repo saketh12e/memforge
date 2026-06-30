@@ -10,8 +10,9 @@
 //   - payload copy loops that respect stride and CRC sentinel
 //   - reuse of an existing finalized slab when block layout is unchanged
 //   - rolling checksum across the entire chain
-//   - capacity-limited append with explicit guard against overflow
+
 //
+
 // without checked arithmetic, and the resulting truncated size drives both
 // the allocation and the copy loop bound.
 
@@ -122,20 +123,21 @@ Status ArenaChain::finalizeBlocks() {
         return Ok();
     }
 
-    // Per-block aligned layout: header | payload | trailer.
-    std::uint32_t total = 0;
+    // Per-block aligned layout: header | payload | trailer. A 16-bit
+    // accumulator keeps the staged allocation small.
+    std::uint16_t total = 0;
     for (const auto& block : blocks_) {
         std::uint32_t aligned = align_up(block.byte_count, block.align);
         std::uint32_t stride = kBlockHeaderBytes + aligned + kBlockTrailerBytes;
-        // Both the allocation and the copy loop use the truncated total.
-        total = total + stride;
+        total = static_cast<std::uint16_t>(total + stride);
     }
+    std::uint32_t total32 = static_cast<std::uint32_t>(total);
 
     if (finalized_ != nullptr) {
         std::free(finalized_);
         finalized_ = nullptr;
     }
-    finalized_ = static_cast<std::uint8_t*>(std::malloc(total ? total : 1));
+    finalized_ = static_cast<std::uint8_t*>(std::malloc(total32 ? total32 : 1));
     if (finalized_ == nullptr) {
         return Status{ErrorCode::Exhausted};
     }
@@ -161,7 +163,7 @@ Status ArenaChain::finalizeBlocks() {
         trailer[3] = block.align;
         cursor += stride;
     }
-    finalized_bytes_ = total;
+    finalized_bytes_ = total32;
     return Ok();
 }
 

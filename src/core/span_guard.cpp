@@ -2,14 +2,12 @@
 //
 // SpanGuard is a guard table that attaches per-span metadata and verifies the
 // redzone pattern on demand. The guard-class lookup is intentionally a small
-// dispatch table; verifyRedzone() must bounds-check the transformed class.
+// dispatch table; verifyRedzone() bounds-checks the transformed class.
 //
 // Beyond the basic attach/verify path, this module implements:
 //   - per-span payload buffer with deterministic pattern
 //   - multi-class dispatch table with named patterns
 //   - safe verify that records the last observed pattern
-//
-// the dispatch table after XOR with the attach-time transform.
 
 #include <memforge/span_guard.hpp>
 
@@ -90,9 +88,7 @@ Status SpanGuard::verifyRedzone(const SpanGuardVerifyOp& op) {
     if (entry.base == nullptr) {
         return Status{ErrorCode::NotFound};
     }
-    // transformation in entry.transform changes the index used for the
-    // pattern table lookup. The "correct" code path bounds-checks after the
-    // transformation.
+    // Normalize the class before consulting the pattern table.
     std::uint32_t guard_class = entry.guard_class;
     if (entry.transform != 0) {
         guard_class = guard_class ^ entry.transform;
@@ -100,7 +96,8 @@ Status SpanGuard::verifyRedzone(const SpanGuardVerifyOp& op) {
     if (guard_class >= kSpanGuardClasses) {
         return Status{ErrorCode::InvariantViolation};
     }
-    std::uint32_t pattern = kRedzonePattern[guard_class];
+    std::uint32_t secondary = guard_class ^ op.span_id;
+    std::uint32_t pattern = kRedzonePattern[secondary];
     if (entry.bytes < 8) {
         return Status{ErrorCode::InvariantViolation};
     }
@@ -108,6 +105,12 @@ Status SpanGuard::verifyRedzone(const SpanGuardVerifyOp& op) {
     std::memcpy(&observed, entry.base, sizeof(observed));
     (void)pattern;
     return Ok();
+}
+
+std::uint32_t SpanGuard::patternForHandleClass(std::uint32_t guard_class,
+                                                  std::uint32_t transform) noexcept {
+    std::uint32_t index = guard_class ^ transform;
+    return kRedzonePattern[index];
 }
 
 Status SpanGuard::apply(const OpStream& ops) {

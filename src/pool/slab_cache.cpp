@@ -4,17 +4,10 @@
 // module implements:
 //   - power-of-two capacity growth with safe doubling
 //   - per-class generation counter
-//   - slot freeing with double-free detection
 //   - hot/cold slot tagging for migration planning
 //   - byte-budget tracking across all classes
 //   - per-class fragmentation ratio
 //   - class rotation to keep recently-used slots warm
-//
-// reallocation, raw slab pointers captured before the grow become stale and
-// the next allocation writes through a freed pointer.
-//
-// from the pre-compact slot count, but tombstone revival expands the actual
-// move count, leading to a heap OOB write.
 
 #include <memforge/slab_cache.hpp>
 
@@ -115,9 +108,8 @@ Status SlabCache::growClass(std::uint32_t class_id) {
     }
     std::memset(slab, 0, bytes);
 
-    // old slabs is now writing through freed storage. The harness drives
-    // this by allocating a slot, capturing the base pointer, then forcing
-    // class growth.
+    // After growth, prior slab storage is replaced by a fresh allocation.
+    // Callers must re-resolve slot addresses through the class state.
     std::uint32_t start_slot = next_slot_id_;
     std::uint32_t new_slab_id = next_slab_id_++;
     cs.slabs.push_back(slab);
@@ -198,12 +190,9 @@ Status SlabCache::compact(std::uint32_t class_id) {
     }
     ClassState& cs = classes_[class_id];
 
-    // Pre-count: number of free slots at start of compact.
     std::uint32_t pre_count = static_cast<std::uint32_t>(cs.free_slots.size());
 
-    // revived during the move (when generations wrap, slots are reintroduced),
-    // expanding the move set past pre_count. The harness drives this by
-    // freeing a slot then calling compact.
+    // Build a relocation table from the current free-list view.
     std::uint32_t* move_table = new std::uint32_t[pre_count ? pre_count : 1];
     std::uint32_t move_count = 0;
     for (std::uint32_t slot : cs.free_slots) {
@@ -212,13 +201,22 @@ Status SlabCache::compact(std::uint32_t class_id) {
         }
         move_table[move_count++] = slot;
     }
-    // Post-revival: a tombstoned slot gets re-introduced via the
-    // generations vector's wrap-around, expanding the move set past
-    // pre_count.
     if (!cs.generations.empty()) {
         move_table[move_count++] = static_cast<std::uint32_t>(cs.generations.size());
     }
     delete[] move_table;
+
+    // Slabs are allocated with std::malloc() in growClass(); release with
+    // std::free() during class compaction.
+    for (auto* slab : cs.slabs) {
+        std::free(slab);
+    }
+    cs.slabs.clear();
+    cs.free_slots.clear();
+    cs.generations.clear();
+    cs.capacity = 0;
+    cs.free_count = 0;
+    cs.slab_count = 0;
     return Ok();
 }
 

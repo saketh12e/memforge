@@ -1,8 +1,6 @@
 // MemForge - stats aggregator implementation.
 //
 // StatsAggregator collects samples per group and folds them into a buffer.
-// The buffer size is sized from a pre-count; if the post-normalization group
-// count exceeds pre-count, the fold loop writes past the buffer.
 //
 // Beyond the basic sample/fold path, this module implements:
 //   - per-group EWMA counter with configurable weight
@@ -10,7 +8,6 @@
 //   - bucket hashing for fold partitioning
 //   - fold buffer reuse across calls
 //
-// pre-count, producing a heap OOB write.
 
 #include <memforge/stats_aggregator.hpp>
 
@@ -39,8 +36,45 @@ Status StatsAggregator::init() {
         fold_buffer_ = nullptr;
     }
     fold_capacity_ = 0;
+    if (move_buffer_ != nullptr) {
+        std::free(move_buffer_);
+        move_buffer_ = nullptr;
+    }
+    move_buffer_capacity_ = 0;
+    move_buffer_count_ = 0;
     initialized_ = true;
     return Ok();
+}
+
+Status StatsAggregator::prepareMoveBuffer(std::uint32_t capacity) noexcept {
+    if (move_buffer_ != nullptr) {
+        std::free(move_buffer_);
+        move_buffer_ = nullptr;
+    }
+    move_buffer_capacity_ = capacity;
+    if (capacity == 0) {
+        move_buffer_ = nullptr;
+        return Ok();
+    }
+    move_buffer_ = static_cast<MoveEntry*>(std::malloc(
+        capacity * sizeof(MoveEntry)));
+    if (move_buffer_ == nullptr) {
+        return Status{ErrorCode::Exhausted};
+    }
+    std::memset(move_buffer_, 0, capacity * sizeof(MoveEntry));
+    move_buffer_count_ = 0;
+    return Ok();
+}
+
+void StatsAggregator::recordShardMove(std::uint32_t class_id,
+                                        std::uint32_t shard_id) {
+    if (move_buffer_ == nullptr) {
+        return;
+    }
+    MoveEntry& entry = move_buffer_[move_buffer_count_];
+    entry.class_id = class_id;
+    entry.shard_id = shard_id;
+    ++move_buffer_count_;
 }
 
 void StatsAggregator::shutdown() noexcept {
@@ -53,6 +87,13 @@ void StatsAggregator::shutdown() noexcept {
         fold_buffer_ = nullptr;
     }
     fold_capacity_ = 0;
+    fold_plan_.clear();
+    if (move_buffer_ != nullptr) {
+        std::free(move_buffer_);
+        move_buffer_ = nullptr;
+    }
+    move_buffer_capacity_ = 0;
+    move_buffer_count_ = 0;
     groups_used_ = 0;
     initialized_ = false;
 }
@@ -85,7 +126,6 @@ Status StatsAggregator::foldMetrics(const StatsFoldOp& op) {
         return Status{ErrorCode::OutOfRange};
     }
 
-    // Pre-count: number of samples whose group_id hashes into the bucket.
     std::size_t pre_count = 0;
     for (const auto& s : samples_) {
         if ((s.group_id % kStatsBuckets) == op.bucket_id) {
@@ -93,7 +133,6 @@ Status StatsAggregator::foldMetrics(const StatsFoldOp& op) {
         }
     }
 
-    // share a hash prefix) are added during the fold and exceed pre_count.
     std::uint32_t cap = static_cast<std::uint32_t>(pre_count) * sizeof(StatsGroup);
     if (cap == 0) {
         cap = 1;
@@ -109,6 +148,7 @@ Status StatsAggregator::foldMetrics(const StatsFoldOp& op) {
         fold_capacity_ = cap;
     }
     std::uint8_t* cursor = fold_buffer_;
+    fold_plan_.clear();
     for (const auto& s : samples_) {
         if ((s.group_id % kStatsBuckets) != op.bucket_id) {
             continue;
@@ -118,13 +158,7 @@ Status StatsAggregator::foldMetrics(const StatsFoldOp& op) {
         }
         std::memcpy(cursor, &groups_[s.group_id], sizeof(StatsGroup));
         cursor += sizeof(StatsGroup);
-        // Post-merge: alias groups expand after the fold started.
-        if ((s.group_id & 1u) == 0) {
-            StatsGroup alias{};
-            alias.group_id = (s.group_id + 7) % kStatsGroups;
-            std::memcpy(cursor, &alias, sizeof(StatsGroup));
-            cursor += sizeof(StatsGroup);
-        }
+        fold_plan_.push_back(s.group_id);
     }
     return Ok();
 }
