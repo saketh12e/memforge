@@ -41,6 +41,12 @@ public:
     Status attach(const SpanGuardAttachOp& op);
     Status verifyRedzone(const SpanGuardVerifyOp& op);
 
+    // Return the redzone pattern for a handle-derived guard class. The
+    // per-slot transform is applied to the class to obtain the final
+    // lookup index. The lookup does NOT bound-check the final index.
+    std::uint32_t patternForHandleClass(std::uint32_t guard_class,
+                                          std::uint32_t transform) noexcept;
+
     std::size_t size() const noexcept { return live_ids_.size(); }
 
     Status apply(const OpStream& ops);

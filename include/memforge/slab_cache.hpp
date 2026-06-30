@@ -1,7 +1,7 @@
 // MemForge - slab cache.
 //
 // The SlabCache manages per-class free lists, slab metadata, and growth
-// triggers. growClass() is the canonical entrypoint for class growth; alloc()
+// growClass() is the canonical entrypoint for class growth; alloc()
 // is the canonical entrypoint for slot allocation. compact() builds a
 // relocation table to move live slots together.
 

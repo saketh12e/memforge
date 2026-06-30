@@ -55,6 +55,20 @@ public:
     Status evictBucket(std::uint32_t bucket_id, bool keep_summary);
     Status destroy();
 
+    // Apply a single op directly. Used by replay workflows to dispatch
+    // HubEvict/HubDestroy outside the applyOps ordering.
+    Status applyHubOp(const Op& op);
+
+    // Register a scratch buffer against a transactional scope. The buffer is
+    // owned by the hub and released by releaseScopeScratch() or hub shutdown.
+    // TxScope uses this so that rollback can free a buffer through the hub
+    // and not through its own record list.
+    Status registerScratch(std::uint32_t scope_id, std::uint8_t* buffer,
+                           std::uint32_t bytes);
+    // Release and free every scratch buffer registered under this scope_id.
+    Status releaseScopeScratch(std::uint32_t scope_id) noexcept;
+    std::size_t scratchCount() const noexcept { return scratch_.size(); }
+
     ArenaChain& arena() noexcept { return arena_; }
     SlabCache& pool() noexcept { return pool_; }
     HandleTable& handles() noexcept { return handles_; }
@@ -95,6 +109,12 @@ private:
     BatchAllocator batches_;
     ShardMap shards_;
     std::vector<ResourceBucket> buckets_;
+    struct ScratchSlot {
+        std::uint32_t scope_id{0};
+        std::uint8_t* buffer{nullptr};
+        std::uint32_t bytes{0};
+    };
+    std::vector<ScratchSlot> scratch_;
     bool initialized_{false};
 };
 

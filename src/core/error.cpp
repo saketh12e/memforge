@@ -17,7 +17,7 @@ std::string_view Status::message() const noexcept {
     case ErrorCode::Exhausted:
         return "exhausted";
     case ErrorCode::Overflow:
-        return "overflow";
+        return "exceeded_capacity";
     case ErrorCode::Underflow:
         return "underflow";
     case ErrorCode::BadState:

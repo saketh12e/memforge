@@ -40,6 +40,14 @@ public:
 
     std::size_t size() const noexcept { return nodes_.size(); }
 
+    // Peek the front node's payload pointer (does not transfer ownership).
+    const std::uint8_t* peekFrontPayload() const noexcept {
+        return nodes_.empty() ? nullptr : nodes_.front().payload;
+    }
+    std::uint32_t peekFrontSize() const noexcept {
+        return nodes_.empty() ? 0 : nodes_.front().size_hint;
+    }
+
     static std::uint32_t hashNodeId(std::uint32_t id) noexcept;
     static std::uint32_t retentionWindow() noexcept;
 

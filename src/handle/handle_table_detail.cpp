@@ -19,7 +19,7 @@ std::uint32_t generation_from_packed(std::uint32_t packed) noexcept {
     return (packed >> 16) & 0xFFFFu;
 }
 
-bool is_stale(const HandleEntry& entry, std::uint32_t generation) noexcept {
+bool is_obsolete(const HandleEntry& entry, std::uint32_t generation) noexcept {
     return entry.generation != generation && generation != 0;
 }
 

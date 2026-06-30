@@ -1,7 +1,4 @@
 // MemForge - checked arithmetic for allocation size computation.
-//
-// Allocation math overflow is one of the leading causes of undersized allocation
-// bugs. Every allocation in MemForge goes through these helpers.
 
 #ifndef MEMFORGE_CHECKED_MATH_HPP
 #define MEMFORGE_CHECKED_MATH_HPP

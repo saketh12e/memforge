@@ -36,6 +36,18 @@ public:
     Status tick(std::uint32_t advance);
     Status drain(std::uint32_t cap);
 
+    // Drain retired nodes to a caller-owned payload buffer list (does not
+    // free). Up to cap nodes are transferred; the rest stay in retired_
+    // with their payload pointers still valid.
+    Status drainToTransfer(std::uint32_t cap,
+                            std::vector<std::uint8_t*>& transferred,
+                            std::vector<std::uint32_t>& sizes) noexcept;
+
+    // Read the cursor view's payload bytes into a summary buffer.
+    Status cursorSummary(std::vector<std::uint8_t>& out) noexcept;
+    std::size_t retiredCount() const noexcept { return retired_.size(); }
+    std::size_t cursorIndex() const noexcept { return cursor_index_; }
+
     std::uint32_t epoch() const noexcept { return current_epoch_; }
     std::size_t pending() const noexcept { return queue_.size(); }
 
@@ -52,6 +64,8 @@ private:
     std::vector<EpochNode> retired_;
     std::uint32_t current_epoch_{0};
     std::uint32_t cursor_index_{0};
+    std::uint8_t* cached_cursor_view_{nullptr};
+    std::uint32_t cached_cursor_size_{0};
     bool initialized_{false};
 };
 

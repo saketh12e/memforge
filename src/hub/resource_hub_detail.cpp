@@ -52,7 +52,7 @@ HubMetrics ResourceHub::collectMetrics() const noexcept {
     m.pool.fragmentation_ratio = pool_.fragmentationRatio();
 
     m.handles.live = static_cast<std::uint32_t>(handles_.size());
-    m.handles.stale = 0;
+    m.handles.obsolete = 0;
     m.handles.generations = 0;
 
     m.epoch.current = epoch_.epoch();

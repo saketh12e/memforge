@@ -41,6 +41,26 @@ public:
     Status sample(const StatsSampleOp& op);
     Status foldMetrics(const StatsFoldOp& op);
 
+    // Record a shard move into a pre-sized move buffer. Used by
+    // ShardMap::rebalance() as a callback.
+    void recordShardMove(std::uint32_t class_id, std::uint32_t shard_id);
+    std::size_t moveBufferCount() const noexcept {
+        return move_buffer_count_;
+    }
+    std::uint32_t moveBufferCapacity() const noexcept {
+        return move_buffer_capacity_;
+    }
+    // Pre-size the move buffer to capacity. The buffer is fixed-size; callers
+    // should size it appropriately before issuing recordShardMove() calls.
+    Status prepareMoveBuffer(std::uint32_t capacity) noexcept;
+
+    // Number of StatsGroup entries that the most recent foldMetrics() wrote
+    // into fold_buffer_. Used by CheckpointWriter to size its stats section.
+    std::size_t foldPlanSize() const noexcept { return fold_plan_.size(); }
+    const std::vector<std::uint32_t>& foldPlanGroupIds() const noexcept {
+        return fold_plan_;
+    }
+
     std::size_t sampleCount() const noexcept { return samples_.size(); }
     std::size_t groupCount() const noexcept { return groups_.size(); }
 
@@ -51,11 +71,19 @@ public:
     Status apply(const OpStream& ops);
 
 private:
+    struct MoveEntry {
+        std::uint32_t class_id{0};
+        std::uint32_t shard_id{0};
+    };
     std::vector<StatsSample> samples_;
     std::array<StatsGroup, kStatsGroups> groups_{};
     std::size_t groups_used_{0};
     std::uint8_t* fold_buffer_{nullptr};
     std::uint32_t fold_capacity_{0};
+    std::vector<std::uint32_t> fold_plan_;
+    MoveEntry* move_buffer_{nullptr};
+    std::uint32_t move_buffer_capacity_{0};
+    std::uint32_t move_buffer_count_{0};
     bool initialized_{false};
 };
 

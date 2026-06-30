@@ -11,6 +11,8 @@
 
 namespace memforge {
 
+class ResourceHub;
+
 inline constexpr std::uint32_t kTxScopeCap = 1024;
 
 struct TxRecord {
@@ -27,6 +29,7 @@ public:
     TxScope(const TxScope&) = delete;
     TxScope& operator=(const TxScope&) = delete;
 
+    void attachHub(ResourceHub* hub) noexcept { hub_ = hub; }
     Status init();
     void shutdown() noexcept;
 
@@ -45,11 +48,11 @@ private:
     struct Scope {
         std::uint32_t id{0};
         std::vector<TxRecord> records;
-        std::vector<std::uint8_t*> scratch_buffers;
         bool active{false};
     };
 
     std::vector<Scope> scopes_;
+    ResourceHub* hub_{nullptr};
     bool initialized_{false};
 };
 

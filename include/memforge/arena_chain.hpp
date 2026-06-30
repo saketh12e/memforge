@@ -2,7 +2,7 @@
 //
 // An ArenaChain owns a chain of bump blocks. Blocks are appended with
 // appendBlock() and finalized into a contiguous metadata slab with
-// finalizeBlocks(). finalizeBlocks() is the canonical seam where overflow
+
 // arithmetic must be checked.
 
 #ifndef MEMFORGE_ARENA_CHAIN_HPP

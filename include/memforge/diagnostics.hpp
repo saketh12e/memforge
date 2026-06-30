@@ -24,7 +24,7 @@ struct PoolMetrics {
 
 struct HandleMetrics {
     std::uint32_t live{0};
-    std::uint32_t stale{0};
+    std::uint32_t obsolete{0};
     std::uint32_t generations{0};
 };
 

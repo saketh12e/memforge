@@ -2,7 +2,6 @@
 //
 // The header holds the inline versions; this translation unit keeps the
 // checked-math API stable for CMake consumers and exposes additional
-// overflow helpers for tests.
 
 #include <memforge/checked_math.hpp>
 
