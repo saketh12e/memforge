@@ -1,3 +1,9 @@
+archive_catalog_fuzzer
+archive_migration_fuzzer
+archive_snapshot_fuzzer
+archive_handle_fuzzer
+archive_rollback_fuzzer
+archive_route_fuzzer
 arena_fuzzer
 pool_fuzzer
 handle_fuzzer

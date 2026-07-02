@@ -1,5 +1,6 @@
 .agent-memory/
 /build/
+/.build-*/
 /artifacts/
 /fuzz/.verify-build/
 *.o

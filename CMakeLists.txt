@@ -40,6 +40,14 @@ add_library(memforge_core
     src/core/dump.cpp
     src/core/rate_counter.cpp
     src/core/hex.cpp
+    src/archive/archive_session.cpp
+    src/archive/archive_catalog.cpp
+    src/archive/archive_migration.cpp
+    src/archive/archive_snapshot.cpp
+    src/archive/archive_handles.cpp
+    src/archive/archive_rollback.cpp
+    src/archive/archive_routes.cpp
+    src/archive/archive_materializer.cpp
     src/arena/arena_chain.cpp
     src/arena/arena_chain_detail.cpp
     src/arena/batch_allocator.cpp

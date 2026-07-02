@@ -2,7 +2,7 @@
 # MemForge - ClusterFuzzLite build script.
 #
 # Builds every harness in fuzz/targets.list into $OUT and copies the seed
-# corpus / dictionary. The build is deterministic and free of network calls.
+# corpus / dictionary. The build is deterministic and self-contained.
 #
 # IMPORTANT: fuzzer binaries do NOT link src/cli/memforge.cpp (which defines
 # `main()`). Only production sources under src/ (excluding src/cli/) are

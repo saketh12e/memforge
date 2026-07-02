@@ -1,4 +1,3 @@
-homepage: https://github.com/saketh12e/memforge
 language: c++
 primary_contact: saketh12e@users.noreply.github.com
 auto_ccs:
@@ -7,8 +6,13 @@ fuzzing_engines:
 sanitizers:
   - address
   - undefined
-main_repo: https://github.com/saketh12e/memforge
 fuzz_targets:
+  - archive_catalog_fuzzer
+  - archive_migration_fuzzer
+  - archive_snapshot_fuzzer
+  - archive_handle_fuzzer
+  - archive_rollback_fuzzer
+  - archive_route_fuzzer
   - arena_fuzzer
   - pool_fuzzer
   - handle_fuzzer

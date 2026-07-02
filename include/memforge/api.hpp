@@ -24,6 +24,7 @@
 #include <memforge/resource_hub.hpp>
 #include <memforge/span_guard.hpp>
 #include <memforge/batch_allocator.hpp>
+#include <memforge/archive_session.hpp>
 
 namespace memforge {
 
